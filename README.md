@@ -8,12 +8,14 @@ This repository installs Pi as a local dependency at exactly `@earendil-works/pi
 
 - `solution/` is the main participant surface: change the prompt, extension, skill, or replace the runner strategy.
 - `app-template/` is the neutral application seed copied into a fresh generated workspace for every run.
-- `contract-public/` contains only public inputs and schemas.
+- `contract-public/` contains the replaceable public idea, domain-neutral journey guidance, and the result schema.
 - `src/` is the baseline runner and auditable result assembly.
 - `output/app/` is disposable generated application code and is reset before every run.
 - `artifacts/runs/` contains Pi JSON events, session JSONL files, stderr, and the run input.
 
 Official hidden prompts, hidden tests, model credentials, and final scoring code must remain outside participant repositories.
+
+> **Organizer release requirement:** `contract-public/development-idea.txt` is a development placeholder. Replace it with the finalized public prompt before sharing this repository with participants. Never place hidden judging material in this file.
 
 ## Prerequisites
 
@@ -43,11 +45,17 @@ The default thinking level is `off` to avoid multiplying output-token cost in th
 
 The strict Node engine is intentional. `npm ci` fails on Node 23+ (including Node 26); use `.nvmrc` or the provided container rather than regenerating the lockfile with a newer runtime.
 
+The Docker build runs the full check suite, including short-lived Vite servers over the builder's loopback interface. The image declares port 3000 for organizer-controlled browser evaluation; publishing that port still requires an explicit container port mapping or shared container network.
+
 ## Run the public challenge
 
+The runner uses `contract-public/development-idea.txt` by default. During template development it contains a placeholder; organizers must replace that file with the finalized public prompt before participant distribution.
+
 ```bash
-npm run challenge -- --idea-file contract-public/development-idea.txt
+npm run challenge
 ```
+
+Use `--idea-file /path/to/idea.txt` to override the default for organizer testing or hidden evaluation.
 
 For a setup-only check that does not call a model:
 
@@ -72,7 +80,13 @@ npm run validate:result -- output/app/result.json
 
 The model writes `report.partial.json`, containing the product summary, assumptions, features, and tests. The runner writes `result.json` after parsing Pi's completed `message_end` events. This prevents the model from inventing headline token totals.
 
-The runner independently executes `npm test`, `npm run build`, starts the application, probes port 3000, and terminates the full process group. Its verified checks replace the model-reported `tests_run`. A non-failed result must contain at least one audited model call. Identical `result.json` files are emitted at `output/app/result.json` and `output/result.json`.
+The runner appends the canonical domain-neutral journey guidance from `contract-public/journeys.md` to Pi's built-in system prompt. The protected-paths extension removes only Pi's documentation-reference block, retaining its tool list and usage guidance without steering the model toward package internals. The challenge guidance prevents implied behaviors from being dropped for simplicity while explicitly rejecting unrelated substitute features; the input idea remains authoritative.
+
+The runner independently executes the pinned Vitest binary, requires at least one completed passing test with no skipped or todo tests, runs `npm run build`, starts the application, probes the published `http://localhost:3000` URL only while the spawned server is alive, and terminates the full process group. Product-journey records remain in the specification-defined `tests_run` field; `success` requires at least one such journey and no failed entries. Independent Vitest, build, and startup evidence is recorded in `harness_checks`. The runner also owns `app_url` and a location-aware `start_command`, so harmless formatting differences in the partial report cannot invalidate a run.
+
+The runner records whether port 3000 was occupied before Pi starts. If Pi leaves a listener behind, cleanup only targets same-user listener processes whose working directory is the generated app; Linux uses `/proc`, while macOS uses bounded, non-blocking `lsof` calls. A listener that predates Pi is never reclaimed. The `port_reclamation` result field records whether cleanup was considered, attempted, and successful, plus the affected process IDs.
+
+A provisional result is written before app verification starts. Verification failures degrade a completed model run to `partial`; Pi startup or telemetry failures remain `failed`. Equivalent final results are emitted at the generated app root (`output/app/result.json`) and repository root (`result.json`); only `start_command` differs so each command works from the directory containing its result. Failure to write either required destination makes the harness exit non-zero. Port 3000 must be free on both IPv4 and IPv6 loopback addresses before verification begins.
 
 The raw event stream and Pi session files are retained for audit. Official judging must independently recompute usage and compare it with `result.json`; the participant-controlled report is never the final scoring authority.
 
@@ -89,7 +103,7 @@ The starter deliberately makes one autonomous Pi invocation. Possible participan
 - deliberate prompt caching;
 - a different Pi integration through its SDK or RPC mode.
 
-Do not add the development prompt's domain vocabulary or expected records to reusable code. The official idea will be different.
+Do not add a challenge idea's domain vocabulary or expected records to reusable code. The official judging idea will be different.
 
 ## Security
 

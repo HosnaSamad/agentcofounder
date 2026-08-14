@@ -1,6 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AppVerification, PartialRunResult, RunResult, TestRun, UsageSummary } from "./types.js";
+import type {
+  AppVerification,
+  PartialRunResult,
+  PortReclamationAudit,
+  RunResult,
+  TestRun,
+  UsageSummary,
+} from "./types.js";
 
 const FALLBACK_PARTIAL: PartialRunResult = {
   status: "failed",
@@ -12,47 +19,54 @@ const FALLBACK_PARTIAL: PartialRunResult = {
   tests_run: [],
 };
 
-function strings(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+const APP_DIRECTORY_START_COMMAND = "npm run dev";
+
+function quotePosixShellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function rootStartCommand(repositoryRoot: string, appDirectory: string): string {
+  const relativeAppDirectory = path.relative(repositoryRoot, appDirectory).split(path.sep).join("/");
+  return `npm --prefix ${quotePosixShellArgument(relativeAppDirectory)} run dev`;
+}
+
+function filteredStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function normalizeTestRun(value: unknown): TestRun | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.command !== "string" ||
+    typeof candidate.journey !== "string" ||
+    !["passed", "failed"].includes(String(candidate.result))
+  ) return undefined;
+  return {
+    command: candidate.command,
+    journey: candidate.journey,
+    result: candidate.result as TestRun["result"],
+  };
 }
 
 export function normalizePartialResult(value: unknown): PartialRunResult | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const result = value as Record<string, unknown>;
-  const validTests =
-    Array.isArray(result.tests_run) &&
-    result.tests_run.every((test) => {
-      if (typeof test !== "object" || test === null) return false;
-      const candidate = test as Record<string, unknown>;
-      return (
-        typeof candidate.command === "string" &&
-        typeof candidate.journey === "string" &&
-        ["passed", "failed", "skipped"].includes(String(candidate.result))
-      );
-    });
-
-  if (!(
-    ["success", "partial", "failed"].includes(String(result.status)) &&
-    typeof result.app_url === "string" &&
-    typeof result.start_command === "string" &&
-    typeof result.summary === "string" &&
-    strings(result.implemented_features) &&
-    strings(result.assumptions) &&
-    validTests
-  )) return undefined;
+  const status = ["success", "partial", "failed"].includes(String(result.status))
+    ? result.status as PartialRunResult["status"]
+    : "partial";
+  const testsRun = Array.isArray(result.tests_run)
+    ? result.tests_run.map(normalizeTestRun).filter((test): test is TestRun => test !== undefined)
+    : [];
 
   return {
-    status: result.status as PartialRunResult["status"],
-    app_url: result.app_url as string,
-    start_command: result.start_command as string,
-    summary: result.summary as string,
-    implemented_features: [...(result.implemented_features as string[])],
-    assumptions: [...(result.assumptions as string[])],
-    tests_run: (result.tests_run as Array<Record<string, unknown>>).map<TestRun>((test) => ({
-      command: test.command as string,
-      journey: test.journey as string,
-      result: test.result as TestRun["result"],
-    })),
+    status,
+    app_url: "http://localhost:3000",
+    start_command: "npm run dev",
+    summary: typeof result.summary === "string" ? result.summary : "Pi completed without a valid summary.",
+    implemented_features: filteredStrings(result.implemented_features),
+    assumptions: filteredStrings(result.assumptions),
+    tests_run: testsRun,
   };
 }
 
@@ -71,26 +85,51 @@ export function composeResult(
   usage: UsageSummary,
   piExitCode: number,
   verification: AppVerification,
+  portReclamation: PortReclamationAudit,
+  startCommand: string,
 ): RunResult {
-  const trustworthyRun = piExitCode === 0 && usage.model_calls > 0 && verification.passed;
+  const runFailed = piExitCode !== 0 || usage.model_calls === 0 || partial.status === "failed";
+  const productJourneysPassed =
+    partial.tests_run.length > 0 && partial.tests_run.every((test) => test.result === "passed");
+  const status = runFailed ? "failed" : verification.passed && productJourneysPassed ? partial.status : "partial";
   return {
     ...partial,
-    status: trustworthyRun ? partial.status : "failed",
-    tests_run: verification.testsRun,
+    status,
+    app_url: "http://localhost:3000",
+    start_command: startCommand,
+    tests_run: partial.tests_run,
+    harness_checks: verification.checks,
     ...usage,
     pi_exit_code: piExitCode,
     telemetry_source: "pi-json-event-stream",
+    port_reclamation: portReclamation,
   };
 }
 
 export async function writeResult(
   appDirectory: string,
   result: RunResult,
-  mirrorPath?: string,
+  mirrorPaths: string[] = [],
 ): Promise<string[]> {
   const resultPath = path.join(appDirectory, "result.json");
-  const content = `${JSON.stringify(result, null, 2)}\n`;
-  await writeFile(resultPath, content, "utf8");
-  if (mirrorPath) await writeFile(mirrorPath, content, "utf8");
-  return mirrorPath ? [resultPath, mirrorPath] : [resultPath];
+  const writtenPaths: string[] = [];
+  const destinations = [
+    { path: resultPath, value: { ...result, start_command: APP_DIRECTORY_START_COMMAND } },
+    ...mirrorPaths.map((destination) => ({ path: destination, value: result })),
+  ];
+  for (const destination of destinations) {
+    try {
+      await writeFile(destination.path, `${JSON.stringify(destination.value, null, 2)}\n`, "utf8");
+      writtenPaths.push(destination.path);
+    } catch (error) {
+      console.warn(`Unable to write result destination ${destination.path}: ${String(error)}`);
+    }
+  }
+  if (writtenPaths.length === 0) throw new Error("Unable to write result.json to any configured destination");
+  return writtenPaths;
+}
+
+export function missingRequiredResultPaths(writtenPaths: string[], requiredPaths: string[]): string[] {
+  const written = new Set(writtenPaths.map((destination) => path.resolve(destination)));
+  return requiredPaths.filter((destination) => !written.has(path.resolve(destination)));
 }

@@ -11,6 +11,7 @@
     "implemented_features",
     "assumptions",
     "tests_run",
+    "harness_checks",
     "model_calls",
     "input_tokens",
     "output_tokens",
@@ -21,7 +22,28 @@
     "cost_total",
     "call_log",
     "pi_exit_code",
-    "telemetry_source"
+    "telemetry_source",
+    "port_reclamation"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "success" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "tests_run": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": { "result": { "const": "passed" } }
+            }
+          }
+        }
+      }
+    }
   ],
   "properties": {
     "status": { "enum": ["success", "partial", "failed"] },
@@ -45,7 +67,20 @@
         "properties": {
           "command": { "type": "string", "minLength": 1 },
           "journey": { "type": "string", "minLength": 1 },
-          "result": { "enum": ["passed", "failed", "skipped"] }
+          "result": { "enum": ["passed", "failed"] }
+        }
+      }
+    },
+    "harness_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "journey", "result"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "journey": { "type": "string", "minLength": 1 },
+          "result": { "enum": ["passed", "failed"] }
         }
       }
     },
@@ -85,6 +120,29 @@
       }
     },
     "pi_exit_code": { "type": "integer", "minimum": 0 },
-    "telemetry_source": { "const": "pi-json-event-stream" }
+    "telemetry_source": { "const": "pi-json-event-stream" },
+    "port_reclamation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preexisting_listener",
+        "listener_after_pi",
+        "attempted",
+        "reclaimed",
+        "process_ids",
+        "diagnostic"
+      ],
+      "properties": {
+        "preexisting_listener": { "type": "boolean" },
+        "listener_after_pi": { "type": "boolean" },
+        "attempted": { "type": "boolean" },
+        "reclaimed": { "type": "boolean" },
+        "process_ids": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "diagnostic": { "type": "string", "minLength": 1 }
+      }
+    }
   }
 }

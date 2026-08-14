@@ -41,7 +41,7 @@ export interface UsageSummary {
 export interface TestRun {
   command: string;
   journey: string;
-  result: "passed" | "failed" | "skipped";
+  result: "passed" | "failed";
 }
 
 export interface PartialRunResult {
@@ -56,10 +56,21 @@ export interface PartialRunResult {
 
 export interface AppVerification {
   passed: boolean;
-  testsRun: TestRun[];
+  checks: TestRun[];
+}
+
+export interface PortReclamationAudit {
+  preexisting_listener: boolean;
+  listener_after_pi: boolean;
+  attempted: boolean;
+  reclaimed: boolean;
+  process_ids: number[];
+  diagnostic: string;
 }
 
 export interface RunResult extends PartialRunResult, UsageSummary {
+  harness_checks: TestRun[];
   pi_exit_code: number;
   telemetry_source: "pi-json-event-stream";
+  port_reclamation: PortReclamationAudit;
 }

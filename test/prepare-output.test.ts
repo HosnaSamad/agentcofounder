@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,11 +19,18 @@ afterEach(async () => {
 });
 
 describe("prepareOutput", () => {
+  const permissionTestSkipped = process.platform === "win32" || process.getuid?.() === 0;
+  if (permissionTestSkipped) {
+    console.warn("Skipping the stale-result permission test because this process can bypass directory modes.");
+  }
+  const permissionTest = permissionTestSkipped ? it.skip : it;
+
   it("creates and safely resets a managed output", async () => {
     const root = await fixture();
     const output = await prepareOutput(root, "output/app");
     await writeFile(path.join(output, "generated.txt"), "temporary\n", "utf8");
     await writeFile(path.join(root, "output", "result.json"), "stale\n", "utf8");
+    await writeFile(path.join(root, "result.json"), "stale\n", "utf8");
     await prepareOutput(root, "output/app");
 
     expect(await readFile(path.join(output, "seed.txt"), "utf8")).toBe("seed\n");
@@ -31,6 +38,7 @@ describe("prepareOutput", () => {
     await expect(readFile(path.join(root, "output", "result.json"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
+    await expect(readFile(path.join(root, "result.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses to reset an unmarked directory", async () => {
@@ -42,5 +50,16 @@ describe("prepareOutput", () => {
   it("refuses an output outside the managed root", async () => {
     const root = await fixture();
     await expect(prepareOutput(root, "../elsewhere")).rejects.toThrow("must be a child");
+  });
+
+  permissionTest("fails rather than leaving an authoritative stale root result", async () => {
+    const root = await fixture();
+    await writeFile(path.join(root, "result.json"), "stale\n", "utf8");
+    await chmod(root, 0o555);
+    try {
+      await expect(prepareOutput(root, "output/app")).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(root, 0o755);
+    }
   });
 });
