@@ -1,0 +1,15 @@
+node_modules/
+.npm-cache/
+.env
+.env.*
+!.env.example
+*.log
+
+artifacts/*
+!artifacts/.gitkeep
+output/*
+!output/.gitkeep
+
+app-template/node_modules/
+app-template/dist/
+coverage/
