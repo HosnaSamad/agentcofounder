@@ -34,10 +34,14 @@ Provider-specific credentials are read by Pi. The optional challenge variables s
 ```bash
 export CHALLENGE_PROVIDER="provider-name"
 export CHALLENGE_MODEL="model-id"
-export CHALLENGE_THINKING="medium"
+export CHALLENGE_THINKING="off"
 ```
 
 Never commit credentials. `.env.example` documents variable names, but the runner intentionally does not load `.env` files.
+
+The default thinking level is `off` to avoid multiplying output-token cost in the efficiency ranking. Raise it only when measurements show the extra reasoning improves completion quality.
+
+The strict Node engine is intentional. `npm ci` fails on Node 23+ (including Node 26); use `.nvmrc` or the provided container rather than regenerating the lockfile with a newer runtime.
 
 ## Run the public challenge
 
@@ -68,6 +72,8 @@ npm run validate:result -- output/app/result.json
 
 The model writes `report.partial.json`, containing the product summary, assumptions, features, and tests. The runner writes `result.json` after parsing Pi's completed `message_end` events. This prevents the model from inventing headline token totals.
 
+The runner independently executes `npm test`, `npm run build`, starts the application, probes port 3000, and terminates the full process group. Its verified checks replace the model-reported `tests_run`. A non-failed result must contain at least one audited model call. Identical `result.json` files are emitted at `output/app/result.json` and `output/result.json`.
+
 The raw event stream and Pi session files are retained for audit. Official judging must independently recompute usage and compare it with `result.json`; the participant-controlled report is never the final scoring authority.
 
 `reasoning_tokens` and `cost_total` are included as additional audit fields. No efficiency score is calculated here because the public specification must first define the cache-write weighting and whether ranking uses the custom token formula or Pi's monetary cost.
@@ -87,6 +93,6 @@ Do not add the development prompt's domain vocabulary or expected records to reu
 
 ## Security
 
-Pi and participant extensions execute with the permissions of the current process. The included extension only prevents common accidental writes; it is not a sandbox. Official evaluation must run each frozen submission in an isolated container or VM with bounded CPU, memory, disk, time, and network access.
+Pi and participant extensions execute with the permissions of the current process. The included extension rejects direct `write` and `edit` calls outside the generated app, but shell commands and symlink tricks can bypass an in-process guard. It is not a sandbox. Official evaluation must run each frozen submission in an isolated container or VM with a read-only harness mount and bounded CPU, memory, disk, time, and network access.
 
 See `docs/organizer-checklist.md` before publishing the template or running a judged submission.

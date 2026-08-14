@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MARKER = ".agent-cofounder-output";
@@ -16,6 +16,12 @@ export async function prepareOutput(
   const outputDirectory = path.resolve(repositoryRoot, requestedOutputDirectory);
   if (!isInside(outputRoot, outputDirectory)) {
     throw new Error(`Output directory must be a child of ${outputRoot}`);
+  }
+
+  try {
+    await unlink(path.join(outputRoot, "result.json"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 
   let outputExists = false;

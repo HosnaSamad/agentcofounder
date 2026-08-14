@@ -24,6 +24,7 @@
 - Provide a short-lived model credential scoped to the designated gateway and model.
 - Block instance metadata, internal networks, and unrelated outbound network access.
 - Enforce wall-clock and process-tree termination outside the participant process.
+- Mount the harness, public contract, validator, and result schema read-only; give the agent write access only to its generated app and artifact directories.
 - Run hidden browser tests from a separate process or container.
 - Recompute telemetry from the captured Pi session and gateway records.
 - Treat disagreement between participant telemetry, Pi session telemetry, and gateway telemetry as a failed audit.

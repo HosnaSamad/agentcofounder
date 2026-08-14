@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,25 +7,28 @@ import type { RunResult } from "./types.js";
 
 const SOURCE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(SOURCE_DIRECTORY, "..");
+const schema = JSON.parse(
+  readFileSync(path.join(REPOSITORY_ROOT, "contract-public", "result.schema.json"), "utf8"),
+) as object;
+const ajv = new Ajv({ allErrors: true, strict: true });
+const validateSchema = ajv.compile(schema);
 
 function sameNumber(actual: number, expected: number): boolean {
   return Math.abs(actual - expected) < 1e-9;
 }
 
 export async function validateResultObject(value: unknown): Promise<string[]> {
-  const schema = JSON.parse(
-    await readFile(path.join(REPOSITORY_ROOT, "contract-public", "result.schema.json"), "utf8"),
-  ) as object;
-  const ajv = new Ajv({ allErrors: true, strict: true });
-  const validate = ajv.compile(schema);
-  if (!validate(value)) {
-    return (validate.errors ?? []).map(
+  if (!validateSchema(value)) {
+    return (validateSchema.errors ?? []).map(
       (error: ErrorObject) => `${error.instancePath || "/"} ${error.message ?? "is invalid"}`,
     );
   }
 
   const result = value as RunResult;
   const errors: string[] = [];
+  if (result.status !== "failed" && result.model_calls === 0) {
+    errors.push("non-failed result must include at least one model call");
+  }
   const totals = result.call_log.reduce(
     (sum, call) => ({
       input: sum.input + call.input_tokens,

@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { PartialRunResult, RunResult, UsageSummary } from "./types.js";
+import type { AppVerification, PartialRunResult, RunResult, TestRun, UsageSummary } from "./types.js";
 
 const FALLBACK_PARTIAL: PartialRunResult = {
   status: "failed",
@@ -16,8 +16,8 @@ function strings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function isPartialResult(value: unknown): value is PartialRunResult {
-  if (typeof value !== "object" || value === null) return false;
+export function normalizePartialResult(value: unknown): PartialRunResult | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
   const result = value as Record<string, unknown>;
   const validTests =
     Array.isArray(result.tests_run) &&
@@ -31,7 +31,7 @@ function isPartialResult(value: unknown): value is PartialRunResult {
       );
     });
 
-  return (
+  if (!(
     ["success", "partial", "failed"].includes(String(result.status)) &&
     typeof result.app_url === "string" &&
     typeof result.start_command === "string" &&
@@ -39,14 +39,28 @@ function isPartialResult(value: unknown): value is PartialRunResult {
     strings(result.implemented_features) &&
     strings(result.assumptions) &&
     validTests
-  );
+  )) return undefined;
+
+  return {
+    status: result.status as PartialRunResult["status"],
+    app_url: result.app_url as string,
+    start_command: result.start_command as string,
+    summary: result.summary as string,
+    implemented_features: [...(result.implemented_features as string[])],
+    assumptions: [...(result.assumptions as string[])],
+    tests_run: (result.tests_run as Array<Record<string, unknown>>).map<TestRun>((test) => ({
+      command: test.command as string,
+      journey: test.journey as string,
+      result: test.result as TestRun["result"],
+    })),
+  };
 }
 
 export async function readPartialResult(appDirectory: string): Promise<PartialRunResult> {
   try {
     const raw = await readFile(path.join(appDirectory, "report.partial.json"), "utf8");
     const parsed: unknown = JSON.parse(raw);
-    return isPartialResult(parsed) ? parsed : FALLBACK_PARTIAL;
+    return normalizePartialResult(parsed) ?? FALLBACK_PARTIAL;
   } catch {
     return FALLBACK_PARTIAL;
   }
@@ -56,18 +70,27 @@ export function composeResult(
   partial: PartialRunResult,
   usage: UsageSummary,
   piExitCode: number,
+  verification: AppVerification,
 ): RunResult {
+  const trustworthyRun = piExitCode === 0 && usage.model_calls > 0 && verification.passed;
   return {
     ...partial,
-    status: piExitCode === 0 ? partial.status : "failed",
+    status: trustworthyRun ? partial.status : "failed",
+    tests_run: verification.testsRun,
     ...usage,
     pi_exit_code: piExitCode,
     telemetry_source: "pi-json-event-stream",
   };
 }
 
-export async function writeResult(appDirectory: string, result: RunResult): Promise<string> {
+export async function writeResult(
+  appDirectory: string,
+  result: RunResult,
+  mirrorPath?: string,
+): Promise<string[]> {
   const resultPath = path.join(appDirectory, "result.json");
-  await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  return resultPath;
+  const content = `${JSON.stringify(result, null, 2)}\n`;
+  await writeFile(resultPath, content, "utf8");
+  if (mirrorPath) await writeFile(mirrorPath, content, "utf8");
+  return mirrorPath ? [resultPath, mirrorPath] : [resultPath];
 }

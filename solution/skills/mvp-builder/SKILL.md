@@ -9,7 +9,7 @@ description: Turn a non-technical product idea into a small, tested browser appl
 2. Choose the smallest data model and interface that cover those journeys.
 3. Prefer browser-local persistence unless the idea genuinely requires a backend.
 4. Implement accessible controls, validation, empty states, errors, and responsive layout.
-5. Test observable user behaviour rather than implementation details.
+5. Test observable user behaviour with the included Vitest, jsdom, and Testing Library setup.
 6. Run the tests and production build before reporting success.
 7. Write `report.partial.json` with this exact shape:
 

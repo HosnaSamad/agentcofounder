@@ -4,9 +4,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareOutput } from "./prepare-output.js";
+import { signalProcessTree, usesDetachedProcessGroup } from "./process-tree.js";
 import { composeResult, readPartialResult, writeResult } from "./result.js";
 import { collectUsageFromJsonLines } from "./usage.js";
 import { validateResultObject } from "./validate-result.js";
+import { verifyGeneratedApp } from "./verify-app.js";
 
 interface Arguments {
   ideaFile: string;
@@ -15,7 +17,7 @@ interface Arguments {
   skipAppInstall: boolean;
 }
 
-interface CommandResult {
+export interface CommandResult {
   exitCode: number;
   timedOut: boolean;
 }
@@ -36,7 +38,7 @@ Options:
 Environment:
   CHALLENGE_PROVIDER      Optional Pi provider override
   CHALLENGE_MODEL         Optional Pi model override
-  CHALLENGE_THINKING      Optional Pi thinking level (default: medium)
+  CHALLENGE_THINKING      Optional Pi thinking level (default: off)
   CHALLENGE_TIMEOUT_MS    Wall-clock limit for Pi (default: 900000)
 `);
 }
@@ -108,7 +110,7 @@ function summarizeEventLine(line: string): void {
   }
 }
 
-async function runPi(
+export async function runPi(
   args: string[],
   cwd: string,
   eventFile: string,
@@ -126,13 +128,19 @@ async function runPi(
       ".bin",
       process.platform === "win32" ? "pi.cmd" : "pi",
     );
-    const child = spawn(piBinary, args, { cwd, env: process.env, shell: false });
+    const child = spawn(piBinary, args, {
+      cwd,
+      detached: usesDetachedProcessGroup(),
+      env: { ...process.env, PI_OFFLINE: "1" },
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let timedOut = false;
     let killTimer: NodeJS.Timeout | undefined;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      signalProcessTree(child, "SIGTERM");
+      killTimer = setTimeout(() => signalProcessTree(child, "SIGKILL"), 5_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -164,15 +172,25 @@ async function runPi(
   return result;
 }
 
-function buildPiArguments(prompt: string, artifactDirectory: string): string[] {
+export function buildPiArguments(
+  idea: string,
+  systemPrompt: string,
+  appContext: string,
+  artifactDirectory: string,
+): string[] {
   const args = [
     "--mode",
     "json",
+    "--print",
     "--approve",
+    "--offline",
     "--no-extensions",
     "--no-skills",
     "--no-prompt-templates",
     "--no-themes",
+    "--no-context-files",
+    "--system-prompt",
+    `${systemPrompt.trim()}\n\n## Generated application contract\n\n${appContext.trim()}`,
     "--session-dir",
     path.join(artifactDirectory, "sessions"),
     "--extension",
@@ -182,8 +200,8 @@ function buildPiArguments(prompt: string, artifactDirectory: string): string[] {
   ];
   if (process.env.CHALLENGE_PROVIDER) args.push("--provider", process.env.CHALLENGE_PROVIDER);
   if (process.env.CHALLENGE_MODEL) args.push("--model", process.env.CHALLENGE_MODEL);
-  if (process.env.CHALLENGE_THINKING) args.push("--thinking", process.env.CHALLENGE_THINKING);
-  args.push(prompt);
+  args.push("--thinking", process.env.CHALLENGE_THINKING ?? "off");
+  args.push(`## Product idea\n\n${idea.trim()}\n`);
   return args;
 }
 
@@ -213,16 +231,17 @@ async function main(): Promise<void> {
   }
   if (args.prepareOnly) return;
 
+  const appContext = await readFile(path.join(outputDirectory, "AGENTS.md"), "utf8");
+
   const runId = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
   const artifactDirectory = path.join(REPOSITORY_ROOT, "artifacts", "runs", runId);
   await mkdir(path.join(artifactDirectory, "sessions"), { recursive: true });
   await writeFile(path.join(artifactDirectory, "idea.txt"), idea, "utf8");
 
-  const prompt = `${systemPrompt.trim()}\n\n## Product idea\n\n${idea.trim()}\n`;
   const eventFile = path.join(artifactDirectory, "events.jsonl");
   const stderrFile = path.join(artifactDirectory, "pi.stderr.log");
   const pi = await runPi(
-    buildPiArguments(prompt, artifactDirectory),
+    buildPiArguments(idea, systemPrompt, appContext, artifactDirectory),
     outputDirectory,
     eventFile,
     stderrFile,
@@ -231,8 +250,13 @@ async function main(): Promise<void> {
 
   const usage = collectUsageFromJsonLines(await readFile(eventFile, "utf8"));
   const partial = await readPartialResult(outputDirectory);
-  const result = composeResult(partial, usage, pi.exitCode);
-  const resultPath = await writeResult(outputDirectory, result);
+  const verification = await verifyGeneratedApp(outputDirectory, artifactDirectory);
+  const result = composeResult(partial, usage, pi.exitCode, verification);
+  const resultPaths = await writeResult(
+    outputDirectory,
+    result,
+    path.join(REPOSITORY_ROOT, "output", "result.json"),
+  );
   const validationErrors = await validateResultObject(result);
   if (validationErrors.length > 0) {
     for (const error of validationErrors) console.error(`- ${error}`);
@@ -240,10 +264,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`Result written to ${resultPath}`);
+  console.log(`Result written to ${resultPaths.join(" and ")}`);
   console.log(`Audit artifacts written to ${artifactDirectory}`);
   if (pi.timedOut) console.error("Pi exceeded CHALLENGE_TIMEOUT_MS and was terminated.");
   if (pi.exitCode !== 0 || result.status !== "success") process.exitCode = 1;
 }
 
-await main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}
