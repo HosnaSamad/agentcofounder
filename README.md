@@ -1,0 +1,92 @@
+# AgentCofounder starter
+
+A forkable baseline for the AgentCofounder challenge. It gives every team the same pinned Pi runtime, neutral web application seed, execution command, telemetry collector, and public contract while leaving the actual agent strategy participant-owned.
+
+This repository installs Pi as a local dependency at exactly `@earendil-works/pi-coding-agent@0.84.1`. Do not use the floating shell installer and do not run `pi update` during the challenge.
+
+## Repository boundary
+
+- `solution/` is the main participant surface: change the prompt, extension, skill, or replace the runner strategy.
+- `app-template/` is the neutral application seed copied into a fresh generated workspace for every run.
+- `contract-public/` contains only public inputs and schemas.
+- `src/` is the baseline runner and auditable result assembly.
+- `output/app/` is disposable generated application code and is reset before every run.
+- `artifacts/runs/` contains Pi JSON events, session JSONL files, stderr, and the run input.
+
+Official hidden prompts, hidden tests, model credentials, and final scoring code must remain outside participant repositories.
+
+## Prerequisites
+
+- Node.js 22.19.x. The repository deliberately rejects other major versions.
+- npm 10.9.3, matching the committed lockfiles and container image.
+- Provider authentication supported by Pi, or organizer-provided provider/model environment variables.
+
+## Setup
+
+```bash
+npm ci --ignore-scripts
+npm --prefix app-template ci --ignore-scripts
+npm run check
+```
+
+Provider-specific credentials are read by Pi. The optional challenge variables select the organizer's runtime configuration:
+
+```bash
+export CHALLENGE_PROVIDER="provider-name"
+export CHALLENGE_MODEL="model-id"
+export CHALLENGE_THINKING="medium"
+```
+
+Never commit credentials. `.env.example` documents variable names, but the runner intentionally does not load `.env` files.
+
+## Run the public challenge
+
+```bash
+npm run challenge -- --idea-file contract-public/development-idea.txt
+```
+
+For a setup-only check that does not call a model:
+
+```bash
+npm run challenge -- --prepare-only
+```
+
+After a complete run:
+
+```bash
+cd output/app
+npm run dev
+```
+
+The app must be available at `http://localhost:3000`. In another terminal, validate the machine-readable result:
+
+```bash
+npm run validate:result -- output/app/result.json
+```
+
+## Result and telemetry ownership
+
+The model writes `report.partial.json`, containing the product summary, assumptions, features, and tests. The runner writes `result.json` after parsing Pi's completed `message_end` events. This prevents the model from inventing headline token totals.
+
+The raw event stream and Pi session files are retained for audit. Official judging must independently recompute usage and compare it with `result.json`; the participant-controlled report is never the final scoring authority.
+
+`reasoning_tokens` and `cost_total` are included as additional audit fields. No efficiency score is calculated here because the public specification must first define the cache-write weighting and whether ranking uses the custom token formula or Pi's monetary cost.
+
+## Develop the harness
+
+The starter deliberately makes one autonomous Pi invocation. Possible participant improvements include:
+
+- a shorter or more reliable prompt;
+- specialized extensions or tools;
+- reusable but domain-neutral application primitives;
+- test-and-repair orchestration;
+- deliberate prompt caching;
+- a different Pi integration through its SDK or RPC mode.
+
+Do not add the development prompt's domain vocabulary or expected records to reusable code. The official idea will be different.
+
+## Security
+
+Pi and participant extensions execute with the permissions of the current process. The included extension only prevents common accidental writes; it is not a sandbox. Official evaluation must run each frozen submission in an isolated container or VM with bounded CPU, memory, disk, time, and network access.
+
+See `docs/organizer-checklist.md` before publishing the template or running a judged submission.
