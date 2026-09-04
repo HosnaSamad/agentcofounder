@@ -35,3 +35,15 @@ description: Turn a non-technical product idea into a small, tested browser appl
 
 Use `success` only when `tests_run` contains at least one user journey and every entry passed. Use `partial` when useful functionality remains incomplete or any journey failed or was not run, and `failed` when the app cannot run. Never invent a passing test.
 Use only `passed` or `failed` for each test result. Record an unrun check as `failed` and explain why in its journey.
+
+## Seed Test File Detection
+
+**CRITICAL:** The seed already contains `app-template/src/App.test.tsx` with placeholder tests.
+
+You MUST:
+1. Find this file
+2. Replace the `test.todo()` placeholders with real, passing tests
+3. Add tests for YOUR specific entity/attributes/filter/derived value
+4. DO NOT delete the file or remove the existing tests
+
+**Before finishing, run `npm test` and confirm ALL tests pass.**
